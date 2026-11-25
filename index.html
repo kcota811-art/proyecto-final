@@ -1,0 +1,338 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mi modelo Teachable Machine</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #eef2f7;
+      color: #263247;
+      text-align: center;
+    }
+
+    .contenedor {
+      width: 90%;
+      max-width: 650px;
+      margin: 45px auto;
+      padding: 30px;
+      background: white;
+      border-radius: 18px;
+      box-shadow: 0 5px 20px #00000015;
+    }
+
+    h1 {
+      color: #263f70;
+    }
+
+    #estado {
+      margin: 20px;
+      font-weight: bold;
+      color: #d18a20;
+    }
+
+    #camara {
+      display: flex;
+      justify-content: center;
+      margin: 20px auto;
+    }
+
+    canvas {
+      max-width: 100%;
+      border-radius: 12px;
+    }
+
+    .botones {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      flex-wrap: wrap;
+      margin: 25px 0;
+    }
+
+    button {
+      padding: 14px 25px;
+      border: none;
+      border-radius: 10px;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    button:hover:not(:disabled) {
+      transform: scale(1.04);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #iniciar {
+      background: #16865b;
+    }
+
+    #desconectar {
+      background: #d74747;
+    }
+
+    #resultados {
+      margin-top: 25px;
+      text-align: left;
+    }
+
+    .resultado {
+      margin: 15px 0;
+    }
+
+    .barra {
+      height: 12px;
+      background: #e1e6ed;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 7px;
+    }
+
+    .progreso {
+      height: 100%;
+      background: #16865b;
+      width: 0%;
+      transition: width 0.2s;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="contenedor">
+
+    <h1>Mi modelo de Teachable Machine</h1>
+
+    <p>Reconocimiento de imágenes en tiempo real</p>
+
+    <div id="estado">● Modelo desconectado</div>
+
+    <div id="camara"></div>
+
+    <div class="botones">
+
+      <button id="iniciar" onclick="iniciarModelo()">
+        ▶ Iniciar modelo
+      </button>
+
+      <button id="desconectar"
+              onclick="desconectarModelo()"
+              disabled>
+        ⏹ Desconectar
+      </button>
+
+    </div>
+
+    <h3>Resultados del reconocimiento</h3>
+
+    <div id="resultados">
+      Esperando conexión...
+    </div>
+
+  </div>
+
+  <script>
+
+    // Rutas de los archivos de tu modelo
+    const URL_MODELO = "./modelo/";
+
+    let modelo = null;
+    let camara = null;
+    let ejecutando = false;
+    let frameId = null;
+    let iniciando = false;
+
+    const estado = document.getElementById("estado");
+    const resultados = document.getElementById("resultados");
+    const iniciarBtn = document.getElementById("iniciar");
+    const desconectarBtn = document.getElementById("desconectar");
+    const contenedorCamara = document.getElementById("camara");
+
+    // INICIAR MODELO
+    async function iniciarModelo() {
+
+      if (ejecutando || iniciando) return;
+
+      iniciando = true;
+      iniciarBtn.disabled = true;
+
+      try {
+
+        estado.textContent = "● Cargando modelo...";
+        resultados.textContent = "Cargando archivos...";
+
+        // Cargar modelo y metadata
+        modelo = await tmImage.load(
+          URL_MODELO + "model.json",
+          URL_MODELO + "metadata.json"
+        );
+
+        // Preparar cámara
+        camara = new tmImage.Webcam(300, 300, true);
+
+        await camara.setup();
+        await camara.play();
+
+        // Mostrar cámara
+        contenedorCamara.innerHTML = "";
+        contenedorCamara.appendChild(camara.canvas);
+
+        ejecutando = true;
+
+        estado.textContent = "● Modelo conectado";
+        estado.style.color = "#16865b";
+
+        iniciarBtn.disabled = true;
+        desconectarBtn.disabled = false;
+
+        // Iniciar reconocimiento
+        predecir();
+
+      } catch (error) {
+
+        console.error(error);
+
+        estado.textContent = "● Error al conectar";
+        estado.style.color = "#d74747";
+
+        resultados.textContent =
+          "No se pudo iniciar el modelo. Revisa los archivos y permisos de cámara.";
+
+        if (camara) {
+          try { camara.stop(); } catch(e) {}
+        }
+
+        if (modelo) {
+          try { modelo.dispose(); } catch(e) {}
+        }
+
+        camara = null;
+        modelo = null;
+
+        contenedorCamara.innerHTML = "";
+
+        iniciarBtn.disabled = false;
+        desconectarBtn.disabled = true;
+
+      } finally {
+        iniciando = false;
+      }
+    }
+
+    // RECONOCIMIENTO EN TIEMPO REAL
+    async function predecir() {
+
+      if (!ejecutando || !modelo || !camara) return;
+
+      try {
+
+        camara.update();
+
+        const predicciones = await modelo.predict(
+          camara.canvas
+        );
+
+        if (!ejecutando) return;
+
+        resultados.innerHTML = "";
+
+        predicciones.forEach(prediccion => {
+
+          const porcentaje =
+            (prediccion.probability * 100).toFixed(1);
+
+          const elemento = document.createElement("div");
+          elemento.className = "resultado";
+
+          const nombre = document.createElement("strong");
+          nombre.textContent = prediccion.className +
+            ": " + porcentaje + "%";
+
+          const barra = document.createElement("div");
+          barra.className = "barra";
+
+          const progreso = document.createElement("div");
+          progreso.className = "progreso";
+          progreso.style.width = porcentaje + "%";
+
+          barra.appendChild(progreso);
+          elemento.appendChild(nombre);
+          elemento.appendChild(barra);
+
+          resultados.appendChild(elemento);
+
+        });
+
+      } catch (error) {
+
+        console.error("Error en predicción:", error);
+
+        if (ejecutando) {
+          estado.textContent = "● Error de reconocimiento";
+          estado.style.color = "#d74747";
+        }
+
+        return;
+      }
+
+      if (ejecutando) {
+        frameId = requestAnimationFrame(predecir);
+      }
+    }
+
+    // DESCONECTAR MODELO
+    function desconectarModelo() {
+
+      ejecutando = false;
+
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+        frameId = null;
+      }
+
+      // Apagar cámara y liberar recursos
+      if (camara) {
+        camara.stop();
+        camara = null;
+      }
+
+      if (modelo) {
+        modelo.dispose();
+        modelo = null;
+      }
+
+      // Limpiar interfaz
+      contenedorCamara.innerHTML = "";
+
+      resultados.textContent =
+        "Modelo desconectado. Esperando conexión...";
+
+      estado.textContent = "● Modelo desconectado";
+      estado.style.color = "#d18a20";
+
+      iniciarBtn.disabled = false;
+      desconectarBtn.disabled = true;
+
+    }
+
+  </script>
+
+</body>
+</html>
